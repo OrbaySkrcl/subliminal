@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Eşikaltı Akış</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Affirmasyon cümlelerini ayarlanabilir hızda, bilinçaltı seviyesine kadar döngüde akıtan uygulama.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <main class="stage-col">
+    <div class="stage" id="stage" tabindex="-1" aria-label="Akış alanı">
+      <img id="bgImage" class="stage-media" alt="" hidden>
+      <video id="bgVideo" class="stage-media" loop muted playsinline hidden></video>
+      <canvas id="canvas" aria-hidden="true"></canvas>
+
+      <button type="button" class="idle-play" id="idlePlay">
+        <span class="idle-play-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="28" height="28"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></svg>
+        </span>
+        <span class="idle-play-label" id="idleLabel">Başlat</span>
+        <span class="idle-play-hint">Boşluk tuşu · F tam ekran</span>
+      </button>
+
+      <div class="hud" id="hud">
+        <button type="button" class="hud-btn hud-play" id="btnPlay" aria-label="Başlat">
+          <svg class="i-play" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" fill="currentColor"/></svg>
+          <svg class="i-pause" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/></svg>
+        </button>
+        <div class="hud-data">
+          <span class="hud-item"><b id="hudExposure">–</b><small>görünme</small></span>
+          <span class="hud-item"><b id="hudRate">–</b><small>cümle/sn</small></span>
+          <span class="hud-item"><b id="hudShown">0</b><small>gösterim</small></span>
+          <span class="hud-item"><b id="hudTime">00:00</b><small id="hudTimeLabel">süre</small></span>
+        </div>
+        <button type="button" class="hud-btn" id="btnFullscreen" aria-label="Tam ekran">
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <aside class="panel" aria-label="Ayarlar">
+    <header class="brand">
+      <h1 class="wordmark">Eşikaltı</h1>
+      <p class="tagline">Affirmasyon takistoskobu. Cümlelerini yaz ya da yükle, hızı seç, akışı başlat.</p>
+    </header>
+
+    <!-- CÜMLELER -->
+    <section class="group" aria-labelledby="h-text">
+      <div class="group-head">
+        <h2 id="h-text">Cümleler</h2>
+        <span class="chip" id="sampleChip">Örnek metin</span>
+      </div>
+      <div class="dropzone" id="dropzone">
+        <textarea id="text" rows="9" spellcheck="false" placeholder="Her satıra bir affirmasyon yaz…&#10;ya da .txt dosyanı buraya sürükle."></textarea>
+        <div class="drop-hint" aria-hidden="true">Bırak, cümleleri yükleyeyim</div>
+      </div>
+      <div class="actions">
+        <label class="btn" for="fileInput">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          .txt yükle
+        </label>
+        <input type="file" id="fileInput" accept=".txt,text/plain" multiple class="visually-hidden">
+        <button type="button" class="btn btn-quiet" id="btnSample">Örneği yükle</button>
+        <button type="button" class="btn btn-quiet" id="btnClear">Temizle</button>
+        <button type="button" class="btn btn-quiet" id="btnExport">İndir</button>
+      </div>
+      <p class="note" id="fileStatus" role="status"></p>
+      <div class="checks">
+        <label class="check"><input type="checkbox" id="optAppend"> Yüklenen dosyayı mevcut metnin sonuna ekle</label>
+        <label class="check"><input type="checkbox" id="optSplit"> Satırları noktalama işaretlerinden cümlelere böl</label>
+        <label class="check"><input type="checkbox" id="optDedupe"> Tekrar eden cümleleri çıkar</label>
+        <label class="check"><input type="checkbox" id="optUpper"> BÜYÜK HARFLE göster</label>
+        <label class="check"><input type="checkbox" id="optShuffle"> Her turda sırayı karıştır</label>
+      </div>
+      <p class="stats" id="textStats">–</p>
+    </section>
+
+    <!-- HIZ -->
+    <section class="group" aria-labelledby="h-speed">
+      <div class="group-head">
+        <h2 id="h-speed">Hız</h2>
+        <span class="pill" id="levelPill">–</span>
+      </div>
+      <div class="seg" role="radiogroup" aria-label="Hız modu">
+        <input type="radio" name="speedMode" id="smAuto" value="auto"><label for="smAuto">Otomatik</label>
+        <input type="radio" name="speedMode" id="smManual" value="manual"><label for="smManual">Manuel</label>
+      </div>
+
+      <div id="autoBox" class="sub">
+        <div class="seg seg-3" role="radiogroup" aria-label="Hedef seviye">
+          <input type="radio" name="level" id="lvReadable" value="readable"><label for="lvReadable">Okunabilir</label>
+          <input type="radio" name="level" id="lvFast" value="fast"><label for="lvFast">Hızlı</label>
+          <input type="radio" name="level" id="lvSub" value="subliminal"><label for="lvSub">Bilinçaltı</label>
+        </div>
+        <p class="note" id="autoExplain"></p>
+      </div>
+
+      <div class="slider-block">
+        <label for="speed" class="slider-label">Hız <span class="note-inline">(kaydırınca Manuel'e geçer)</span></label>
+        <input type="range" id="speed" min="0" max="100" step="0.5">
+        <div class="scale" aria-hidden="true"><span>8 sn</span><span>1 sn</span><span>100 ms</span><span>1 kare</span></div>
+      </div>
+
+      <dl class="readout">
+        <div><dt>Görünme süresi</dt><dd id="roExposure">–</dd></div>
+        <div><dt>Ekran karesi</dt><dd id="roFrames">–</dd></div>
+        <div><dt>Akış</dt><dd id="roRate">–</dd></div>
+        <div><dt>Tam döngü</dt><dd id="roCycle">–</dd></div>
+      </dl>
+    </section>
+
+    <!-- GÖRÜNÜM -->
+    <section class="group" aria-labelledby="h-look">
+      <h2 id="h-look">Görünüm</h2>
+      <div class="seg seg-3" role="radiogroup" aria-label="Akış modu">
+        <input type="radio" name="mode" id="mdFlow" value="flow"><label for="mdFlow">Akış</label>
+        <input type="radio" name="mode" id="mdFlash" value="flash"><label for="mdFlash">Flaş</label>
+        <input type="radio" name="mode" id="mdRain" value="rain"><label for="mdRain">Yağmur</label>
+      </div>
+      <p class="note" id="modeExplain"></p>
+
+      <div class="fields">
+        <div class="field" id="fLanes">
+          <label for="lanes"><span id="lanesLabel">Şerit sayısı</span> <output id="lanesOut" for="lanes"></output></label>
+          <input type="range" id="lanes" min="1" max="6" step="1">
+        </div>
+        <div class="field" id="fDirection">
+          <label for="direction">Yön</label>
+          <select id="direction">
+            <option value="down">Yukarıdan aşağı</option>
+            <option value="up">Aşağıdan yukarı</option>
+          </select>
+        </div>
+        <label class="check" id="fFlashGap"><input type="checkbox" id="flashGap"> Cümleler arasına 1 boş kare koy (maskeleme)</label>
+        <div class="field">
+          <label for="font">Yazı tipi</label>
+          <select id="font">
+            <option value="plex">Sade (Plex Sans)</option>
+            <option value="display">Karakterli (Bricolage)</option>
+            <option value="serif">Tırnaklı (Georgia)</option>
+            <option value="mono">Eşaralıklı (Plex Mono)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="fontSize">Yazı boyutu <output id="fontSizeOut" for="fontSize"></output></label>
+          <input type="range" id="fontSize" min="14" max="96" step="1">
+        </div>
+        <label class="check"><input type="checkbox" id="bold"> Kalın yazı</label>
+        <div class="field-pair">
+          <div class="field color-field">
+            <label for="color">Yazı rengi</label>
+            <input type="color" id="color">
+          </div>
+          <div class="field color-field">
+            <label for="bg">Arka plan</label>
+            <input type="color" id="bg">
+          </div>
+        </div>
+        <div class="field">
+          <label for="opacity">Yazı görünürlüğü <output id="opacityOut" for="opacity"></output></label>
+          <input type="range" id="opacity" min="3" max="100" step="1">
+        </div>
+        <div class="field">
+          <span class="field-label">Arka plan resmi / videosu</span>
+          <div class="row wrap">
+            <label class="btn btn-quiet" for="mediaInput">Dosya seç</label>
+            <input type="file" id="mediaInput" accept="image/*,video/*" class="visually-hidden">
+            <button type="button" class="btn btn-quiet" id="btnMediaClear" hidden>Kaldır</button>
+            <span class="note" id="mediaName">Yok</span>
+          </div>
+        </div>
+        <div class="field" id="fDim" hidden>
+          <label for="dim">Medyayı karart <output id="dimOut" for="dim"></output></label>
+          <input type="range" id="dim" min="0" max="100" step="1">
+        </div>
+      </div>
+    </section>
+
+    <!-- SES -->
+    <details class="group" id="audioGroup">
+      <summary><h2>Ses</h2><span class="summary-note" id="audioSummary">Kapalı</span></summary>
+      <div class="fields">
+        <div class="field">
+          <label for="ambient">Arka plan sesi</label>
+          <select id="ambient">
+            <option value="off">Kapalı</option>
+            <option value="pink">Pembe gürültü</option>
+            <option value="brown">Kahverengi gürültü</option>
+            <option value="alpha">Binaural alfa · 10 Hz (sakin odak)</option>
+            <option value="theta">Binaural teta · 6 Hz (derin rahatlama)</option>
+            <option value="delta">Binaural delta · 2,5 Hz (uyku)</option>
+            <option value="file">Kendi ses dosyam</option>
+          </select>
+          <p class="note" id="ambientNote"></p>
+        </div>
+        <div class="field" id="fAudioFile" hidden>
+          <div class="row wrap">
+            <label class="btn btn-quiet" for="audioInput">Ses dosyası seç</label>
+            <input type="file" id="audioInput" accept="audio/*" class="visually-hidden">
+            <span class="note" id="audioName">Seçilmedi</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="ambientVol">Ses düzeyi <output id="ambientVolOut" for="ambientVol"></output></label>
+          <input type="range" id="ambientVol" min="0" max="100" step="1">
+        </div>
+        <hr class="rule">
+        <label class="check"><input type="checkbox" id="tts"> Cümleleri sesli oku (tarayıcı sesi)</label>
+        <p class="note" id="ttsNote"></p>
+        <div class="fields" id="ttsBox">
+          <div class="field">
+            <label for="voice">Okuyan ses</label>
+            <select id="voice"><option value="">Varsayılan</option></select>
+          </div>
+          <div class="field">
+            <label for="ttsRate">Okuma hızı <output id="ttsRateOut" for="ttsRate"></output></label>
+            <input type="range" id="ttsRate" min="0.5" max="4" step="0.1">
+          </div>
+          <div class="field">
+            <label for="ttsVol">Okuma ses düzeyi <output id="ttsVolOut" for="ttsVol"></output></label>
+            <input type="range" id="ttsVol" min="0" max="100" step="1">
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <!-- OTURUM -->
+    <details class="group" id="sessionGroup">
+      <summary><h2>Oturum</h2><span class="summary-note" id="sessionSummary">Sınırsız</span></summary>
+      <div class="fields">
+        <div class="field">
+          <label for="session">Süre</label>
+          <select id="session">
+            <option value="0">Sınırsız</option>
+            <option value="5">5 dakika</option>
+            <option value="10">10 dakika</option>
+            <option value="15">15 dakika</option>
+            <option value="20">20 dakika</option>
+            <option value="30">30 dakika</option>
+            <option value="60">60 dakika</option>
+          </select>
+        </div>
+        <label class="check"><input type="checkbox" id="wake"> Akış sürerken ekranı açık tut</label>
+        <button type="button" class="btn btn-quiet" id="btnResetCounters">Sayaçları sıfırla</button>
+        <div class="keys">
+          <span class="field-label">Kısayollar</span>
+          <ul>
+            <li><kbd>Boşluk</kbd> başlat / durdur</li>
+            <li><kbd>F</kbd> tam ekran</li>
+            <li><kbd>↑</kbd> <kbd>↓</kbd> hızlandır / yavaşlat</li>
+            <li><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> akış / flaş / yağmur</li>
+            <li><kbd>Esc</kbd> tam ekrandan çık</li>
+          </ul>
+        </div>
+      </div>
+    </details>
+
+    <p class="caution">
+      Hızlı yanıp sönen görüntüler ışığa duyarlı epilepsisi olan kişilerde nöbeti tetikleyebilir.
+      Baş dönmesi veya rahatsızlık hissedersen akışı durdur.
+    </p>
+  </aside>
+</div>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <h2 id="modalTitle">Başlamadan önce</h2>
+    <p>Bu uygulama yüksek hızda yanıp sönen ve akan metin gösterir. Işığa duyarlı epilepsin varsa ya da daha önce ışık kaynaklı nöbet geçirdiysen kullanma.</p>
+    <p>Uzun oturumlarda göz yorgunluğunu azaltmak için yazı görünürlüğünü düşürebilir, arada mola verebilirsin.</p>
+    <div class="row end">
+      <button type="button" class="btn btn-quiet" id="modalCancel">Vazgeç</button>
+      <button type="button" class="btn btn-primary" id="modalOk">Anladım, başlat</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="js/text.js"></script>
+<script src="js/speed.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
