@@ -81,6 +81,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   height: 100%;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+  grid-template-rows: minmax(0, 1fr); /* satır ekran yüksekliğini aşmasın: panel kendi içinde kaysın */
   gap: 16px;
   padding-block: 16px;
   padding-left: max(16px, env(safe-area-inset-left, 0px));
@@ -176,6 +177,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* ---------- Panel ---------- */
 .panel {
+  position: relative; /* gizli dosya kutuları (absolute) panelin kaydırma alanında kalsın, sayfayı uzatmasın */
   min-width: 0; min-height: 0;
   overflow-y: auto;
   display: flex; flex-direction: column; gap: 14px;
@@ -359,6 +361,55 @@ body.dragging .drop-hint { display: grid; }
 .seg input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: 1px; }
 .sub { display: grid; gap: 8px; }
 
+/* Birimli sayı kutusu: [ 33,3 | ms ] */
+.unit-input {
+  display: flex; align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.unit-input:focus-within { border-color: var(--accent); }
+.unit-input input {
+  flex: 1; min-width: 0;
+  border: 0; outline: none;
+  background: transparent;
+  padding: 7px 10px;
+  font: 500 var(--step-0)/1.2 var(--font-data);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+.unit-input span {
+  display: grid; place-items: center;
+  padding: 0 10px;
+  font: 400 var(--step--1)/1 var(--font-data);
+  color: var(--muted);
+  background: var(--surface-2);
+  border-left: 1px solid var(--line);
+}
+.field-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+
+/* Kare kısayolları: ekranın gerçekten gösterebildiği süreler */
+.frame-chips { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.chip-btn {
+  display: grid; gap: 1px; justify-items: center;
+  padding: 6px 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+.chip-btn b { font: 600 0.72rem/1.2 var(--font-body); }
+.chip-btn span { font: 400 0.68rem/1.2 var(--font-data); color: var(--muted); font-variant-numeric: tabular-nums; }
+.chip-btn:hover { border-color: var(--muted); }
+.chip-btn.on { border-color: var(--accent); background: var(--accent-soft); }
+.chip-btn.on span { color: var(--accent); }
+
+.btn-wide { width: 100%; justify-content: center; min-height: 44px; font-size: var(--step-0); }
+.btn.is-on { background: var(--warn); color: var(--accent-ink); }
+.note-body { margin: 0; font-size: var(--step--1); color: var(--fg); }
+
 /* Kaydırıcılar */
 input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0; }
 .slider-block { display: grid; gap: 6px; }
@@ -398,6 +449,8 @@ input[type="color"] {
 }
 .readout > div { background: var(--bg); padding: 8px 10px; display: grid; gap: 2px; min-width: 0; }
 .readout dt { font-size: 0.72rem; color: var(--muted); letter-spacing: 0.03em; }
+.readout > .wide { grid-column: 1 / -1; }
+.readout.compact dd { font-size: var(--step-0); }
 .readout dd {
   margin: 0;
   font: 500 var(--step-1)/1.2 var(--font-data);
@@ -465,13 +518,15 @@ kbd {
 /* ---------- Dar ekran ---------- */
 @media (max-width: 880px) {
   html, body { height: auto; }
-  .app { height: auto; grid-template-columns: minmax(0, 1fr); }
+  .app { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; }
   .stage-col { height: 62vh; height: 62svh; min-height: 320px; }
   .panel { overflow: visible; padding-right: 0; scrollbar-gutter: auto; }
   .hud-data { gap: 2px 12px; }
 }
 @media (max-width: 420px) {
   .field-pair { grid-template-columns: 1fr; }
+  .frame-chips { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (prefers-reduced-motion: reduce) {

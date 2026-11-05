@@ -79,3 +79,11 @@ test('kare sayısı ve sınıflandırma', () => {
   assert.equal(S.classify(900).key, 'fast');
   assert.equal(S.classify(3000).key, 'readable');
 });
+
+test('kareye oturtma: 60 ve 144 Hz', () => {
+  assert.deepEqual(S.snap(25, F60), { frames: 2, ms: 2 * F60 });
+  assert.deepEqual(S.snap(1, F60), { frames: 1, ms: F60 });
+  assert.deepEqual(S.snap(0, F60), { frames: 1, ms: F60 });
+  assert.equal(S.snap(100, F60).frames, 6);
+  assert.equal(S.snap(25, 1000 / 144).frames, 4);
+});

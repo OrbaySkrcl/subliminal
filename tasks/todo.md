@@ -49,3 +49,55 @@
   (motor artık en uzun kelime sığana kadar yazıyı küçültüyor), tek başına kalan "İndir" düğmesi,
   HUD'un alttaki metinle karışması.
 - Tek dosyalık sürüm artifact olarak yayınlandı (gömülü çerçevede "İndir" → "Kopyala").
+
+---
+
+# İterasyon 2 — ms/süre ayarları + her uygulamanın üstünde flaş (masaüstü)
+
+## Görev anlayışı
+- **ms / süre**: görünme süresi ms olarak elle girilir; flaşlar arası **aralık** (ms), **seri**
+  (art arda kaç cümle), **rastgelelik**; oturum süresi dakika olarak serbest girilir.
+- **Ekran üstü (overlay)**: oyun/film/tarayıcı ne açıksa üstünde flaş. Tarayıcı başka pencerelerin
+  üstüne çizemez → **Electron masaüstü uygulaması**: şeffaf, tıklamayı geçiren, hep üstte pencere.
+- **Doğruluk**: monitör kare kare çizer (60 Hz = 16,7 ms adım). İstenen ms en yakın tam kareye
+  yuvarlanır, **gerçek süre gösterilir**, her flaş rAF zaman damgalarıyla **ölçülür** ve sapma raporlanır.
+
+## Mimari kararlar
+- Flaş zamanlayıcısı motorda yeniden yazılır: süre **zaman tabanlı + yarım kare toleransı**
+  (kare düşse bile süre uzamaz), görünme süresi kareye oturtulur, aralık bitişten itibaren ölçülür.
+- Masaüstü kontrol penceresi = mevcut `index.html` (preload köprüsüyle "Ekran üstü" bölümü açılır).
+  Overlay penceresi = `overlay.html` + aynı motor. Ayar kaynağı tek: kontrol penceresi.
+- Chromium arka plan kısıtlamaları kapatılır (odaksız overlay'de rAF/timer yavaşlamasın).
+- Üstte kalma her 1,5 sn yeniden uygulanır (bazı uygulamalar "en üst"ü çalar).
+
+## Adımlar
+- [x] `speed.js`: `snap(ms, frame)` → {kare, gerçek ms}
+- [x] `engine.js`: yeni flaş zamanlayıcısı (aralık, seri, rastgelelik, konum), ölçüm istatistikleri,
+      kontur (yazı çevresi), önizlemesiz mod (overlay için), devam ettirmede sahte ölçüm olmaması
+- [x] Web arayüzü: ms giriş kutusu + kare kısayolları + "gerçek süre" notu, flaş zamanlaması alanları,
+      ölçülen süre HUD'da, kontur, oturum süresi dakika girişi
+- [x] Masaüstü: `desktop/main.js` (overlay pencereleri, ekran seçimi, kısayol Ctrl+Alt+S, tepsi,
+      açılışta başlat, kayıtta gizle), `desktop/preload.js`, `desktop/overlay-preload.js`,
+      `overlay.html`, `js/overlay.js`, `js/desktop.js` (kontrol bölümü)
+- [x] Paketleme: electron-builder (Windows kurulum + taşınabilir, macOS, Linux), simge,
+      GitHub Actions ile otomatik derleme
+- [x] Testler: zamanlayıcı birim testleri; overlay.html'in Chromium'da şeffaflık + ölçüm testi;
+      Electron'u Xvfb altında gerçekten açıp overlay penceresini ve ölçülen süreleri doğrulama
+- [x] README, artifact güncelle, commit + push, CI'yi kontrol et
+
+## Doğrulama
+- `npm test`, `npm run test:e2e`, `npm run test:desktop` (Xvfb + Electron)
+
+## Review / Results (iterasyon 2)
+- **Birim**: 46/46 (`npm test`). Yeni: 60 Hz ve 144 Hz'de her ms değeri için flaşın tam kare
+  sayısı kadar kaldığı ve ölçülen sürenin beklenenle birebir tuttuğu; aralık, seri, rastgelelik;
+  kare düşmesi (ortada düşen süreyi uzatmaz, sonda düşen en fazla 1 kare uzatır ve "geç" sayılır);
+  duraklat/devam et sahte ölçüm üretmez; çalışırken ms değişince eski flaş ölçüme karışmaz.
+- **Tarayıcı e2e**: 16/16. 59,9 Hz'de 3 kare → ölçülen 49,96 ms (49,9–50,0), 500 ms aralık → 500,0 ms.
+- **Masaüstü e2e (gerçek Electron, Xvfb)**: 10/10. Overlay penceresi şeffaf, her zaman üstte,
+  odak almaz, ekranı kaplar; 50 ms → ölçülen 50,00 ms (49,9–50,1), geç 0/8; canlı ms değişimi;
+  durdurma; oturum süresi dolunca kapanma; kısayol kaydı; ayarların kalıcılığı; konsol hatası yok.
+- **Paketleme**: Windows taşınabilir .exe Linux'ta derlendi (109 MB, PE32). Kurulum (NSIS) Linux'ta
+  Wine istediği için Windows/macOS/Linux paketleri GitHub Actions'ta derleniyor.
+- Ekran görüntüleriyle bulunan ve düzeltilen: masaüstü genişliğinde sayfanın kendisinin kayması
+  (gizli dosya kutuları panelden taşıyordu), ölçüm kutularında satır taşması.

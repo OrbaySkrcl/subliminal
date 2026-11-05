@@ -1,12 +1,87 @@
 {
   "name": "esikalti",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Affirmasyon cümlelerini ayarlanabilir hızda, bilinçaltı seviyesine kadar döngüde akıtan tarayıcı uygulaması.",
   "scripts": {
     "start": "npx --yes http-server -c-1 -p 8080 .",
+    "desktop": "electron .",
     "test": "node --test tests/*.test.js",
-    "test:e2e": "node tests/e2e.mjs"
+    "test:e2e": "node tests/e2e.mjs",
+    "test:desktop": "xvfb-run -a -s \"-screen 0 1600x900x24\" node tests/desktop.e2e.mjs",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "main": "desktop/main.js",
+  "author": {
+    "name": "OrbaySkrcl"
+  },
+  "homepage": "https://github.com/OrbaySkrcl/subliminal",
+  "build": {
+    "appId": "com.orbayskrcl.esikalti",
+    "productName": "Eşikaltı",
+    "copyright": "MIT",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "index.html",
+      "overlay.html",
+      "css/**",
+      "js/**",
+      "desktop/**",
+      "build/icon.png",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Esikalti-Kurulum-${version}.${ext}",
+      "shortcutName": "Eşikaltı"
+    },
+    "portable": {
+      "artifactName": "Esikalti-Tasinabilir-${version}.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.lifestyle",
+      "icon": "build/icon.png",
+      "artifactName": "Esikalti-${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility",
+      "artifactName": "Esikalti-${version}-${arch}.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "44.9.0",
+    "electron-builder": "26.17.0",
+    "playwright": "1.56.1"
+  }
 }

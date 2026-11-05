@@ -44,17 +44,22 @@
     shuffle: false,
     speedMode: 'auto',
     level: 'subliminal',
-    slider: 100,
+    manualMs: 17,
     mode: 'flow',
     lanes: 3,
     direction: 'down',
-    flashGap: false,
+    gapMs: 0,
+    burst: 1,
+    jitter: 0,
+    position: 'center',
     font: 'plex',
     fontSize: 30,
     bold: false,
     color: '#f2ece3',
     bg: '#0a0910',
     opacity: 92,
+    outline: 0,
+    outlineColor: '#000000',
     dim: 55,
     ambient: 'off',
     ambientVol: 35,
@@ -63,7 +68,26 @@
     ttsRate: 1.6,
     ttsVol: 50,
     session: 0,
-    wake: true
+    wake: true,
+    // Masaüstü uygulamasında diğer programların üstünde gösterilen flaş
+    overlay: {
+      mode: 'flash',
+      exposureMs: 33,
+      gapMs: 3000,
+      burst: 1,
+      jitter: 20,
+      position: 'random',
+      lanes: 2,
+      fontSize: 46,
+      color: '#ffffff',
+      opacity: 85,
+      outline: 2,
+      outlineColor: '#000000',
+      display: 'all',
+      sessionMin: 0,
+      hideCapture: false,
+      autoStart: false
+    }
   };
 
   var LEVEL_NOTES = {
@@ -90,11 +114,23 @@
   function load() {
     try {
       var raw = localStorage.getItem(STORE_KEY);
-      if (raw) return Object.assign({}, DEFAULTS, JSON.parse(raw));
+      if (raw) {
+        var saved = JSON.parse(raw);
+        // Eski sürümden geçiş: kaydırıcı konumu → ms, "boş kare" kutusu → aralık
+        if (saved.manualMs == null && saved.slider != null) saved.manualMs = Speed.sliderToExposure(saved.slider);
+        if (saved.gapMs == null && saved.flashGap) saved.gapMs = Speed.FRAME_60;
+        delete saved.slider;
+        delete saved.flashGap;
+        var merged = Object.assign({}, DEFAULTS, saved);
+        merged.overlay = Object.assign({}, DEFAULTS.overlay, saved.overlay || {});
+        return merged;
+      }
     } catch (e) {
       /* depolama kapalı olabilir */
     }
-    return Object.assign({}, DEFAULTS);
+    var fresh = Object.assign({}, DEFAULTS);
+    fresh.overlay = Object.assign({}, DEFAULTS.overlay);
+    return fresh;
   }
   var state = load();
   var saveTimer = 0;
@@ -117,7 +153,8 @@
   var nf1 = new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 1 });
 
   function fmtMs(ms) {
-    return ms >= 1000 ? nf1.format(ms / 1000) + ' sn' : nf0.format(ms) + ' ms';
+    if (ms >= 1000) return nf1.format(ms / 1000) + ' sn';
+    return (ms < 100 ? nf1 : nf0).format(ms) + ' ms';
   }
   function fmtDur(sec) {
     if (sec < 1) return nf0.format(sec * 1000) + ' ms';
@@ -173,6 +210,14 @@
   var media = { url: null, kind: null };
   var lastFrameMs = engine.getFrameMs();
 
+  // Masaüstü köprüsü gibi dinleyiciler: metin ya da görünüm değişince haber verilir
+  var changeListeners = [];
+  function emitChange() {
+    changeListeners.forEach(function (fn) {
+      fn();
+    });
+  }
+
   // ---------- Metin ----------
   function rebuildText() {
     var list = Text.parse(state.text, { splitSentences: state.split, dedupe: state.dedupe });
@@ -187,6 +232,7 @@
       : 'Henüz cümle yok';
     updateIdle();
     applySpeed();
+    emitChange();
   }
 
   var textTimer = 0;
@@ -279,10 +325,42 @@
 
   // ---------- Hız ----------
   var currentMs = 1000;
+  var chipsFrame = 0;
+
+  /** "1 kare · 16,7 ms" kısayolları: ekranın gerçekten gösterebildiği süreler. */
+  function renderFrameChips(frame) {
+    if (Math.abs(frame - chipsFrame) < 0.01) return;
+    chipsFrame = frame;
+    var box = $('frameChips');
+    box.innerHTML = '';
+    [1, 2, 3, 4, 6, 12].forEach(function (n) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip-btn';
+      b.dataset.frames = n;
+      b.innerHTML = '<b>' + n + ' kare</b><span>' + fmtMs(n * frame) + '</span>';
+      b.addEventListener('click', function () {
+        setManualMs(n * engine.getFrameMs());
+      });
+      box.appendChild(b);
+    });
+  }
+
+  function setManualMs(ms) {
+    state.manualMs = Speed.clamp(ms, 1, Speed.MAX_MS);
+    if (state.speedMode !== 'manual') {
+      state.speedMode = 'manual';
+      setRadio('speedMode', 'manual');
+    }
+    save();
+    applySpeed();
+  }
+
   function applySpeed() {
     var frame = engine.getFrameMs();
     var g = engine.geometry();
     var auto = state.speedMode === 'auto';
+    var flash = state.mode === 'flash';
     var ms = auto
       ? Speed.autoExposure({
           avgChars: textStats.avgChars,
@@ -291,28 +369,50 @@
           level: state.level,
           frameMs: frame
         })
-      : Speed.sliderToExposure(state.slider, frame);
+      : state.manualMs;
     currentMs = ms;
     engine.configure({ exposureMs: ms, weighted: auto });
-    if (auto) $('speed').value = Speed.exposureToSlider(ms, frame).toFixed(1);
+    $('speed').value = Speed.exposureToSlider(ms, frame).toFixed(1);
+    var msInput = $('msInput');
+    if (document.activeElement !== msInput) msInput.value = ms < 100 ? Math.round(ms * 10) / 10 : Math.round(ms);
+    renderFrameChips(frame);
 
+    // Flaşta ekranın gerçekten göstereceği süre: tam kare
+    var snap = Speed.snap(ms, frame);
+    var shownMs = flash ? snap.ms : ms;
     var hz = 1000 / frame;
-    var sps = Speed.throughput(ms, g.slots);
-    if (state.mode === 'flash') sps = Math.min(sps, hz * g.slots);
-    var cls = Speed.classify(ms);
-    $('roExposure').textContent = fmtMs(ms);
-    $('roFrames').textContent = Speed.frames(ms, frame) + ' kare · ' + nf0.format(hz) + ' Hz';
+    var burst = Math.max(1, state.burst);
+    var sps = flash
+      ? (burst * 1000) / (burst * snap.ms + (state.gapMs >= frame / 2 ? Speed.snap(state.gapMs, frame).ms : 0))
+      : Speed.throughput(ms, g.slots);
+    var cls = Speed.classify(shownMs);
+    $('roExposure').textContent = fmtMs(shownMs);
+    $('roFrames').textContent = (flash ? snap.frames : Speed.frames(ms, frame)) + ' kare · ' + nf0.format(hz) + ' Hz';
     $('roRate').textContent = fmtRate(sps) + ' cümle/sn';
     $('roCycle').textContent = textStats.count ? fmtDur(textStats.count / sps) : '–';
     var pill = $('levelPill');
     pill.textContent = cls.label;
     pill.dataset.level = cls.key;
-    $('hudExposure').textContent = fmtMs(ms);
+    $('hudExposure').textContent = fmtMs(shownMs);
+    document.querySelectorAll('#frameChips .chip-btn').forEach(function (b) {
+      b.classList.toggle('on', flash && Number(b.dataset.frames) === snap.frames);
+    });
+    $('snapNote').textContent = flash
+      ? Math.abs(snap.ms - ms) > 0.05
+        ? 'İstenen ' + fmtMs(ms) + ' → ekranda ' + fmtMs(snap.ms) + ' (' + snap.frames + ' kare). Ekran ' +
+          nf0.format(hz) + ' Hz: bir yazı ancak ' + fmtMs(frame) + '\'nin katları kadar görünebilir.'
+        : 'Ekranda tam ' + fmtMs(snap.ms) + ' = ' + snap.frames + ' kare (' + nf0.format(hz) + ' Hz).'
+      : 'Bu modda süre, bir cümlenin ekranı boydan boya geçme süresidir.';
     var fit = engine.fontFit();
     $('fontSizeOut').textContent =
       fit < 0.995 ? state.fontSize + ' → ' + Math.round(state.fontSize * fit) + ' px' : state.fontSize + ' px';
     $('fontSizeOut').title = fit < 0.995 ? 'Kelimeler bölünmesin diye şerit genişliğine göre küçültüldü' : '';
     if (!engine.running) $('hudRate').textContent = fmtRate(sps);
+    $('gapNote').textContent =
+      state.gapMs >= frame / 2
+        ? 'Her ' + (burst > 1 ? burst + ' cümlelik seriden' : 'flaştan') + ' sonra ekran ' + fmtMs(Speed.snap(state.gapMs, frame).ms) +
+          (state.jitter ? ' (±%' + state.jitter + ')' : '') + ' boş kalır.'
+        : 'Aralık 0: cümleler arka arkaya gösterilir.';
 
     $('autoBox').hidden = !auto;
     if (auto) {
@@ -327,15 +427,8 @@
   }
 
   function nudgeSpeed(delta) {
-    if (state.speedMode !== 'manual') {
-      state.slider = Number($('speed').value);
-      setRadio('speedMode', 'manual');
-      state.speedMode = 'manual';
-    }
-    state.slider = Speed.clamp(state.slider + delta, 0, 100);
-    $('speed').value = state.slider;
-    save();
-    applySpeed();
+    var pos = Speed.exposureToSlider(currentMs, engine.getFrameMs());
+    setManualMs(Speed.sliderToExposure(Speed.clamp(pos + delta, 0, 100), engine.getFrameMs()));
     showUi();
   }
 
@@ -345,7 +438,12 @@
       mode: state.mode,
       lanes: state.lanes,
       direction: state.direction,
-      flashGap: state.flashGap,
+      gapMs: state.gapMs,
+      burst: state.burst,
+      jitter: state.jitter / 100,
+      position: state.position,
+      outlineWidth: state.outline,
+      outlineColor: state.outlineColor,
       fontFamily: FONTS[state.font] || FONTS.plex,
       fontSize: state.fontSize,
       fontWeight: state.bold ? 700 : 500,
@@ -368,10 +466,15 @@
     var m = state.mode;
     $('fLanes').hidden = m === 'flash';
     $('fDirection').hidden = m === 'flash';
-    $('fFlashGap').hidden = m !== 'flash';
+    $('fPosition').hidden = m !== 'flash';
+    $('flashTiming').hidden = m !== 'flash';
+    $('roMeasuredCell').hidden = m !== 'flash';
+    $('hudMeasuredItem').hidden = m !== 'flash';
+    $('outlineColorField').hidden = !state.outline;
     $('lanesLabel').textContent = m === 'rain' ? 'Yoğunluk' : 'Şerit sayısı';
     $('modeExplain').textContent = MODE_NOTES[m];
     applySpeed();
+    emitChange();
     // Canvas, DOM'da kullanılmayan web fontlarını kendisi yüklemez.
     if (document.fonts && document.fonts.load) {
       var font = canvasFont();
@@ -530,6 +633,12 @@
   function onStats(st) {
     $('hudShown').textContent = nf0.format(st.shown);
     if (st.running) $('hudRate').textContent = fmtRate(st.sps);
+    if (st.flash && st.flash.count) {
+      var f = st.flash;
+      $('hudMeasured').textContent = fmtMs(f.avgMs);
+      $('roMeasured').textContent =
+        fmtMs(f.avgMs) + ' · ' + nf1.format(f.minMs) + '–' + nf1.format(f.maxMs) + ' · geç ' + nf0.format(f.late) + '/' + nf0.format(f.count);
+    }
     if (Math.abs(st.frameMs - lastFrameMs) > 0.3) {
       lastFrameMs = st.frameMs;
       applySpeed();
@@ -576,12 +685,20 @@
 
   // ---------- Uyarı penceresi ----------
   var modalReturn = null;
+  var modalAction = null;
+  /** Işığa duyarlılık uyarısı bir kez onaylanınca eylemi çalıştırır (uygulama içi ya da ekran üstü). */
+  function requireAck(action) {
+    if (acknowledged()) return action();
+    modalAction = action;
+    openModal();
+  }
   function openModal() {
     modalReturn = document.activeElement;
     $('modal').hidden = false;
     $('modalOk').focus();
   }
   function closeModal() {
+    modalAction = null;
     $('modal').hidden = true;
     if (modalReturn && modalReturn.focus) modalReturn.focus();
   }
@@ -636,6 +753,26 @@
     el.value = String(state[key]);
     el.addEventListener('change', function () {
       state[key] = typeof DEFAULTS[key] === 'number' ? Number(el.value) : el.value;
+      save();
+      if (after) after();
+    });
+  }
+
+  /** Sayı kutusu: geçerli bir değer yazıldıkça uygular, odaktan çıkınca sınırlar içine çeker. */
+  function bindNumber(id, key, min, max, after) {
+    var el = $(id);
+    el.value = state[key];
+    el.addEventListener('input', function () {
+      var v = parseFloat(String(el.value).replace(',', '.'));
+      if (isNaN(v) || v < min || v > max) return;
+      state[key] = v;
+      save();
+      if (after) after();
+    });
+    el.addEventListener('change', function () {
+      var v = parseFloat(String(el.value).replace(',', '.'));
+      state[key] = Speed.clamp(isNaN(v) ? state[key] : v, min, max);
+      el.value = state[key];
       save();
       if (after) after();
     });
@@ -717,27 +854,43 @@
 
     // Hız
     bindRadio('speedMode', 'speedMode', function () {
-      if (state.speedMode === 'manual') state.slider = Number($('speed').value);
+      if (state.speedMode === 'manual') state.manualMs = currentMs;
+      save();
       applySpeed();
     });
     bindRadio('level', 'level', applySpeed);
     var sp = $('speed');
-    sp.value = state.slider;
     sp.addEventListener('input', function () {
-      state.slider = Number(sp.value);
-      if (state.speedMode !== 'manual') {
-        state.speedMode = 'manual';
-        setRadio('speedMode', 'manual');
-      }
-      save();
-      applySpeed();
+      var ms = Speed.sliderToExposure(Number(sp.value), engine.getFrameMs());
+      setManualMs(ms < 100 ? Math.round(ms * 10) / 10 : Math.round(ms));
     });
+    var msInput = $('msInput');
+    msInput.addEventListener('input', function () {
+      var v = parseFloat(String(msInput.value).replace(',', '.'));
+      if (v >= 1) setManualMs(v);
+    });
+    msInput.addEventListener('change', function () {
+      msInput.value = Math.round(state.manualMs * 10) / 10;
+    });
+    bindNumber('gapMs', 'gapMs', 0, 600000, applyLook);
+    bindNumber('burst', 'burst', 1, 20, applyLook);
+    bindNumber('jitter', 'jitter', 0, 100, applyLook);
 
     // Görünüm
     bindRadio('mode', 'mode', applyLook);
     bindRange('lanes', 'lanes', String, applyLook);
     bindValue('direction', 'direction', applyLook);
-    bindCheck('flashGap', 'flashGap', applyLook);
+    bindValue('position', 'position', applyLook);
+    bindRange('outline', 'outline', function (v) {
+      return v ? v + ' px' : 'Yok';
+    }, applyLook);
+    var oc = $('outlineColor');
+    oc.value = state.outlineColor;
+    oc.addEventListener('input', function () {
+      state.outlineColor = oc.value;
+      save();
+      applyLook();
+    });
     bindValue('font', 'font', applyLook);
     bindRange('fontSize', 'fontSize', function (v) {
       return v + ' px';
@@ -816,7 +969,7 @@
     });
 
     // Oturum
-    bindValue('session', 'session', function () {
+    bindNumber('session', 'session', 0, 1440, function () {
       updateSessionSummary();
       renderClock();
     });
@@ -851,8 +1004,9 @@
       } catch (e) {
         /* depolama kapalı olabilir */
       }
+      var action = modalAction || play;
       closeModal();
-      play();
+      action();
     });
     $('modalCancel').addEventListener('click', closeModal);
     $('modal').addEventListener('click', function (e) {
@@ -935,7 +1089,7 @@
   }
 
   function updateSessionSummary() {
-    $('sessionSummary').textContent = state.session ? state.session + ' dakika' : 'Sınırsız';
+    $('sessionSummary').textContent = state.session ? nf0.format(state.session) + ' dakika' : 'Sınırsız';
   }
 
   // ---------- Başlangıç ----------
@@ -975,6 +1129,17 @@
   window.esikalti = {
     engine: engine,
     state: state,
+    save: save,
+    fonts: FONTS,
+    fmtMs: fmtMs,
+    toast: toast,
+    requireAck: requireAck,
+    getSentences: function () {
+      return sentences.slice();
+    },
+    onChange: function (fn) {
+      changeListeners.push(fn);
+    },
     play: play,
     pause: pause,
     currentExposure: function () {

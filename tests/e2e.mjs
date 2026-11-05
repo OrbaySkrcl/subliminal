@@ -129,7 +129,8 @@ await step('manuel en yüksek hız: 1 kare, saniyede yüzlerce cümle', async ()
     ms: window.esikalti.currentExposure(),
     frame: window.esikalti.engine.getFrameMs()
   }));
-  assert.ok(Math.abs(ms - frame) < 0.01, `görünme ${ms} ms, kare ${frame} ms`);
+  // Kaydırıcı ms'yi 0,1 hassasiyetle yazar: 16,67 → 16,7
+  assert.ok(Math.abs(ms - frame) < 0.1, `görünme ${ms} ms, kare ${frame} ms`);
   assert.ok(sps > 100, `ölçülen ${sps} cümle/sn`);
   assert.match(await page.textContent('#roFrames'), /^1 kare/);
   await page.screenshot({ path: path.join(shots, '02-akis-maks.png') });
@@ -151,8 +152,54 @@ await step('klavye: 2 = flaş, 3 = yağmur, ↓ yavaşlatır', async () => {
   await page.screenshot({ path: path.join(shots, '04-yagmur.png') });
 });
 
-await step('Boşluk ile durdur', async () => {
+await step('ms kutusu: 30 ms yazınca ekranda 2 kare (33,3 ms) olduğu söylenir', async () => {
+  await page.keyboard.press('Space'); // durdur
+  await page.click('label[for="mdFlash"]');
+  // 25 ms, 60 Hz'de 1 ile 2 karenin tam ortası: eşitlik sınırında olmayan bir değer seç
+  await page.fill('#msInput', '30');
+  await page.waitForTimeout(150);
+  const frame = await page.evaluate(() => window.esikalti.engine.getFrameMs());
+  assert.equal(await page.evaluate(() => window.esikalti.state.manualMs), 30);
+  const shown = (2 * frame).toLocaleString('tr-TR', { maximumFractionDigits: 1 });
+  assert.match(await page.textContent('#snapNote'), new RegExp('30 ms → ekranda ' + shown.replace('.', '\\.') + ' ms \\(2 kare\\)'));
+  assert.equal(await page.getAttribute('#frameChips .chip-btn[data-frames="2"]', 'class'), 'chip-btn on');
+  assert.match(await page.textContent('#roFrames'), /^2 kare/);
+});
+
+await step('kare kısayolu ve aralık: 3 kare + 500 ms aralık, ölçülen süre birebir', async () => {
+  await page.click('#frameChips .chip-btn[data-frames="3"]');
+  await page.fill('#gapMs', '500');
+  await page.fill('#jitter', '0');
   await page.focus('#stage');
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => window.esikalti.engine.flashSummary().count >= 5, null, { timeout: 8000 });
+  const sum = await page.evaluate(() => window.esikalti.engine.flashSummary());
+  const frame = await page.evaluate(() => window.esikalti.engine.getFrameMs());
+  assert.ok(Math.abs(sum.expectedMs - 3 * frame) < 1e-6);
+  assert.ok(Math.abs(sum.avgMs - 3 * frame) < 2, `ölçülen ${sum.avgMs} / ${3 * frame}`);
+  assert.ok(Math.abs(sum.gapAvgMs - 500) <= frame, `aralık ${sum.gapAvgMs}`);
+  await page.waitForTimeout(700);
+  assert.equal(await page.isVisible('#hudMeasuredItem'), true);
+  assert.match(await page.textContent('#roMeasured'), /^(49,\d|50(,\d)?) ms · /);
+  // Masaüstü genişliğinde sayfa kaymaz: yalnızca panel kendi içinde kayar
+  const scroll = await page.evaluate(() => ({ top: document.scrollingElement.scrollTop, sh: document.scrollingElement.scrollHeight, ih: innerHeight }));
+  assert.ok(scroll.top === 0 && scroll.sh <= scroll.ih, JSON.stringify(scroll));
+  console.log(`      tarayıcı ${(1000 / frame).toFixed(1)} Hz · ölçülen ${sum.avgMs.toFixed(2)} ms (${sum.minMs.toFixed(1)}–${sum.maxMs.toFixed(1)}) · aralık ${sum.gapAvgMs.toFixed(1)} ms · geç ${sum.late}/${sum.count}`);
+  await page.screenshot({ path: path.join(shots, '07-flas-zamanlama.png') });
+  await page.keyboard.press('Space');
+  await page.fill('#gapMs', '0');
+});
+
+await step('tarayıcıda Ekran üstü bölümü masaüstü uygulamasına yönlendirir', async () => {
+  assert.equal(await page.isVisible('#overlayWeb'), true);
+  assert.equal(await page.isVisible('#overlayDesk'), false);
+});
+
+await step('Boşluk ile başlat / durdur', async () => {
+  await page.focus('#stage');
+  await page.keyboard.press('Space');
+  await page.waitForTimeout(200);
+  assert.equal(await page.evaluate(() => window.esikalti.engine.running), true);
   await page.keyboard.press('Space');
   await page.waitForTimeout(200);
   assert.equal(await page.evaluate(() => window.esikalti.engine.running), false);

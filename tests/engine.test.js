@@ -15,6 +15,7 @@ function makeEngine(opts) {
   const W = (opts && opts.W) || 800;
   const H = (opts && opts.H) || 600;
   const draws = [];
+  const strokes = [];
   const ctx = {
     font: '',
     fillStyle: '',
@@ -30,6 +31,9 @@ function makeEngine(opts) {
     },
     fillText(t, x, y) {
       draws.push({ t, x, y });
+    },
+    strokeText(t, x, y) {
+      strokes.push({ t, x, y });
     }
   };
   const canvas = { clientWidth: W, clientHeight: H, width: 0, height: 0, getContext: () => ctx };
@@ -42,15 +46,19 @@ function makeEngine(opts) {
   const engine = new sandbox.SubEngine(canvas);
   engine.resize();
   let now = 1000;
+  const frameDt = (opts && opts.frameDt) || FRAME;
+  function skip(ms) {
+    now += ms;
+  }
   function frames(n, dt) {
     for (let i = 0; i < n; i++) {
-      now += dt || FRAME;
+      now += dt || frameDt;
       draws.length = 0;
       engine._tick(now);
       if (opts && opts.onFrame) opts.onFrame(engine, draws.slice());
     }
   }
-  return { engine, frames, draws, W, H };
+  return { engine, frames, skip, draws, strokes, W, H };
 }
 
 function sentences(n) {
@@ -126,45 +134,214 @@ test('akış: yukarı yönde de tüm çizimler ekran içinde', () => {
   for (const y of ys) assert.ok(y > -40 && y < h.H, `y=${y}`);
 });
 
+/** Flaş modunda her karede çizilen metni kaydeder ve ardışık aynı metinleri flaşlara gruplar. */
+function flashRecorder(extra) {
+  const frames = [];
+  const h = makeEngine(Object.assign({ onFrame: (_, d) => frames.push(d.map((x) => x.t).join(' ')) }, extra));
+  return {
+    h,
+    frames,
+    /** [{text:'', frames:n}] — boş metin = aralık */
+    runs(skipFirst) {
+      const runs = [];
+      for (const t of frames) {
+        if (runs.length && runs[runs.length - 1].text === t) runs[runs.length - 1].frames++;
+        else runs.push({ text: t, frames: 1 });
+      }
+      // Son grup yarım kalmış olabilir; ilk grup isteğe bağlı atlanır
+      return runs.slice(skipFirst ? 1 : 0, -1);
+    }
+  };
+}
+
 test('flaş, en yüksek hız: her karede sıradaki cümle, hiçbiri atlanmaz', () => {
-  const seq = [];
-  const h = makeEngine({ onFrame: (_, d) => seq.push(d.map((x) => x.t).join(' ')) });
+  const r = flashRecorder();
   const list = ['Bir', 'İki', 'Üç', 'Dört', 'Beş'];
-  h.engine.setSentences(list);
-  h.engine.configure({ mode: 'flash', exposureMs: 1 });
-  h.engine.start();
-  h.frames(20);
-  // Görünme süresi 1 karenin altında: her kare bir sonraki cümleye geçer
-  const tail = seq.slice(0, 12);
-  for (let i = 1; i < tail.length; i++) {
-    const a = list.indexOf(tail[i - 1]);
-    const b = list.indexOf(tail[i]);
-    assert.equal(b, (a + 1) % list.length, `kare ${i}: ${tail[i - 1]} → ${tail[i]}`);
+  r.h.engine.setSentences(list);
+  r.h.engine.configure({ mode: 'flash', exposureMs: 1 });
+  r.h.engine.start();
+  r.h.frames(20);
+  for (let i = 1; i < r.frames.length; i++) {
+    const a = list.indexOf(r.frames[i - 1]);
+    const b = list.indexOf(r.frames[i]);
+    assert.equal(b, (a + 1) % list.length, `kare ${i}: ${r.frames[i - 1]} → ${r.frames[i]}`);
   }
 });
 
-test('flaş: 25 ms görünme 60 Hz\'de ortalama 1,5 kareye denk gelir', () => {
-  const seq = [];
-  const h = makeEngine({ onFrame: (_, d) => seq.push(d.map((x) => x.t).join(' ')) });
-  h.engine.setSentences(sentences(7));
-  h.engine.configure({ mode: 'flash', exposureMs: 25, fontSize: 10 });
-  h.engine.start();
-  h.frames(600);
-  let changes = 0;
-  for (let i = 1; i < seq.length; i++) if (seq[i] !== seq[i - 1]) changes++;
-  const avgFrames = seq.length / changes;
-  assert.ok(avgFrames > 1.35 && avgFrames < 1.65, `ortalama ${avgFrames} kare`);
+for (const [hz, cases] of [
+  [60, [[1, 1], [17, 1], [25, 2], [33, 2], [50, 3], [100, 6], [250, 15]]],
+  [144, [[1, 1], [7, 1], [25, 4], [50, 7], [100, 14]]]
+]) {
+  test(`flaş ${hz} Hz: görünme süresi tam kareye oturur ve ölçülen süre birebir tutar`, () => {
+    const frame = 1000 / hz;
+    for (const [ms, expectFrames] of cases) {
+      const r = flashRecorder({ frameDt: frame });
+      r.h.engine.frameMs = frame;
+      r.h.engine.setSentences(sentences(7));
+      r.h.engine.configure({ mode: 'flash', exposureMs: ms, fontSize: 10 });
+      r.h.engine.start();
+      r.h.frames(expectFrames * 12 + 5);
+      const runs = r.runs(false);
+      assert.ok(runs.length >= 8, `${ms} ms: ${runs.length} flaş`);
+      for (const run of runs) assert.equal(run.frames, expectFrames, `${ms} ms @ ${hz} Hz`);
+      const sum = r.h.engine.flashSummary();
+      assert.ok(Math.abs(sum.expectedMs - expectFrames * frame) < 1e-9);
+      assert.ok(Math.abs(sum.avgMs - sum.expectedMs) < 1e-6, `ölçülen ${sum.avgMs}, beklenen ${sum.expectedMs}`);
+      assert.equal(sum.late, 0);
+    }
+  });
+}
+
+test('flaş: aralık (ms) — flaştan sonra ekran belirtilen süre boş kalır', () => {
+  const r = flashRecorder();
+  r.h.engine.setSentences(sentences(5));
+  r.h.engine.configure({ mode: 'flash', exposureMs: 33, gapMs: 1000, fontSize: 10 });
+  r.h.engine.start();
+  r.h.frames(60 * 6);
+  const runs = r.runs(false);
+  const shows = runs.filter((x) => x.text);
+  const gaps = runs.filter((x) => !x.text);
+  assert.ok(shows.length >= 5 && gaps.length >= 4);
+  for (const s of shows) assert.equal(s.frames, 2);
+  for (const g of gaps) assert.equal(g.frames, 60, 'aralık 60 kare = 1000 ms olmalı');
+  const sum = r.h.engine.flashSummary();
+  assert.ok(Math.abs(sum.gapAvgMs - 1000) <= FRAME / 2, `ölçülen aralık ${sum.gapAvgMs}`);
 });
 
-test('flaş: maskeleme açıkken cümleler arasında boş kare var', () => {
+test('flaş: seri — her flaşta art arda N farklı cümle, sonra aralık', () => {
+  const r = flashRecorder();
+  r.h.engine.setSentences(sentences(9));
+  r.h.engine.configure({ mode: 'flash', exposureMs: 33, gapMs: 500, burst: 3, fontSize: 10 });
+  r.h.engine.start();
+  r.h.frames(60 * 5);
+  const runs = r.runs(false);
+  // Desen: 3 cümle (2'şer kare) + 1 boşluk (30 kare)
+  for (let i = 0; i + 3 < runs.length; i += 4) {
+    const group = runs.slice(i, i + 3);
+    assert.ok(group.every((g) => g.text && g.frames === 2), JSON.stringify(group));
+    assert.equal(new Set(group.map((g) => g.text)).size, 3);
+    assert.deepEqual(runs[i + 3], { text: '', frames: 30 });
+  }
+});
+
+test('flaş: rastgelelik — aralıklar ±oran içinde değişir', () => {
+  const r = flashRecorder();
+  r.h.engine.setSentences(sentences(5));
+  r.h.engine.configure({ mode: 'flash', exposureMs: 17, gapMs: 1000, jitter: 0.5, fontSize: 10 });
+  r.h.engine.start();
+  r.h.frames(60 * 40);
+  const gaps = r.runs(false).filter((x) => !x.text).map((g) => g.frames * FRAME);
+  assert.ok(gaps.length >= 15);
+  assert.ok(new Set(gaps.map(Math.round)).size > 5, 'aralıklar değişmiyor');
+  for (const g of gaps) assert.ok(g >= 500 - FRAME && g <= 1500 + FRAME, `aralık ${g}`);
+});
+
+test('flaş: kare düşmesi — ortada düşen kare süreyi uzatmaz, sondaki en fazla 1 kare uzatır ve raporlanır', () => {
+  const r = flashRecorder();
+  r.h.engine.setSentences(sentences(5));
+  r.h.engine.configure({ mode: 'flash', exposureMs: 100, fontSize: 10 });
+  r.h.engine.start();
+  // Her 7 karede bir kare düşer: 6 karelik (100 ms) flaşların neredeyse hepsine bir düşme denk gelir
+  for (let i = 0; i < 420; i++) r.h.frames(1, i % 7 === 3 ? 2 * FRAME : FRAME);
+  const samples = r.h.engine.flashStats.samples;
+  const exact = samples.filter((x) => Math.abs(x - 100) < 1e-6).length;
+  // Kare sayarak çalışan bir zamanlayıcıda düşme içeren her flaş 116,7 ms olurdu
+  assert.ok(exact / samples.length > 0.6, `tam süreli flaş oranı ${exact}/${samples.length}`);
+  for (const x of samples) assert.ok(x <= 100 + FRAME + 1e-6, `${x} ms`);
+  const late = samples.filter((x) => x > 100 + FRAME / 2).length;
+  assert.equal(r.h.engine.flashSummary().late, late);
+
+  // Bitiş karesi düşerse ekran ancak bir sonraki karede değişebilir: 1 kare geç, ve raporlanır
+  const e = flashRecorder();
+  e.h.engine.setSentences(sentences(5));
+  e.h.engine.configure({ mode: 'flash', exposureMs: 50, fontSize: 10 });
+  e.h.engine.start();
+  e.h.frames(3); // başla + 2 kare
+  e.h.frames(1, 2 * FRAME); // 50. ms'deki kare düştü
+  const sum = e.h.engine.flashSummary();
+  assert.ok(Math.abs(sum.lastMs - 4 * FRAME) < 1e-6, `${sum.lastMs}`);
+  assert.equal(sum.late, 1);
+});
+
+test('flaş: duraklat / devam et sahte ölçüm üretmez, cümle kaldığı yerden sürer', () => {
+  const r = flashRecorder();
+  r.h.engine.setSentences(sentences(5));
+  r.h.engine.configure({ mode: 'flash', exposureMs: 100, fontSize: 10 });
+  r.h.engine.start();
+  r.h.frames(9);
+  const before = r.frames[r.frames.length - 1];
+  r.h.engine.stop();
+  r.h.skip(5000);
+  r.h.engine.start();
+  r.h.frames(1);
+  assert.equal(r.frames[r.frames.length - 1], before);
+  r.h.frames(60);
+  const sum = r.h.engine.flashSummary();
+  assert.ok(sum.maxMs <= 100 + FRAME, `en uzun ${sum.maxMs}`);
+  assert.equal(sum.late, 0);
+});
+
+test('flaş: çalışırken süre değişince ölçüm yalnızca yeni süreyle başlayan flaşları içerir', () => {
+  const r = flashRecorder();
+  r.h.engine.setSentences(sentences(5));
+  r.h.engine.configure({ mode: 'flash', exposureMs: 50, gapMs: 100, fontSize: 10 });
+  r.h.engine.start();
+  r.h.frames(31); // bir flaş ekrandayken
+  r.h.engine.configure({ exposureMs: 100 });
+  r.h.frames(120);
+  const samples = r.h.engine.flashStats.samples;
+  assert.ok(samples.length >= 3);
+  for (const x of samples) assert.ok(Math.abs(x - 100) < 1e-6, `eski süreden kalan ölçüm: ${x}`);
+});
+
+test('flaş: maskeleme — 1 karelik aralıkla cümleler arasında boş kare', () => {
   const seq = [];
   const h = makeEngine({ onFrame: (_, d) => seq.push(d.length) });
   h.engine.setSentences(sentences(4));
-  h.engine.configure({ mode: 'flash', exposureMs: 1, flashGap: true, fontSize: 10 });
+  h.engine.configure({ mode: 'flash', exposureMs: 1, gapMs: FRAME, fontSize: 10 });
   h.engine.start();
   h.frames(40);
   const pattern = seq.slice(4).map((n) => (n ? 'x' : '_')).join('');
   assert.match(pattern, /^(?:x_)+x?$|^(?:_x)+_?$/);
+});
+
+test('flaş: rastgele konum — yazı her zaman ekranın içinde, konum değişir', () => {
+  const W = 1280;
+  const H = 720;
+  const spots = new Set();
+  const h = makeEngine({
+    W,
+    H,
+    onFrame: (e, d) => {
+      for (const x of d) {
+        const half = (Array.from(x.t).length * e._ensureLayout().size * 0.5) / 2;
+        assert.ok(x.x - half >= -1e-6 && x.x + half <= W + 1e-6, `x=${x.x}`);
+        assert.ok(x.y >= 0 && x.y + e._ensureLayout().lineH <= H, `y=${x.y}`);
+        spots.add(Math.round(x.x) + ',' + Math.round(x.y));
+      }
+    }
+  });
+  h.engine.setSentences(sentences(6));
+  h.engine.configure({ mode: 'flash', exposureMs: 33, position: 'random', fontSize: 40 });
+  h.engine.start();
+  h.frames(120);
+  assert.ok(spots.size > 20, `${spots.size} farklı konum`);
+});
+
+test('kontur: açıkken metin önce çevre çizgisiyle çizilir', () => {
+  const h = makeEngine();
+  h.engine.setSentences(['Bir']);
+  h.engine.configure({ mode: 'flash', exposureMs: 33, outlineWidth: 3 });
+  h.engine.start();
+  h.frames(2);
+  assert.ok(h.strokes.length > 0);
+});
+
+test('önizlemesiz mod (overlay): durağanken hiçbir şey çizilmez', () => {
+  const h = makeEngine();
+  h.engine.configure({ mode: 'flash', preview: false, bgAlpha: 0 });
+  h.engine.setSentences(['Bir', 'İki']);
+  assert.equal(h.draws.length, 0);
 });
 
 test('yağmur, en yüksek hız: atlanan cümle yok', () => {

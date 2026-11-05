@@ -71,6 +71,16 @@
     return clamp(chars / avgChars, 0.5, 2);
   }
 
+  /**
+   * Ekran yalnızca kare sınırlarında değişebilir: istenen süreyi en yakın tam kareye oturtur.
+   * 60 Hz'de 25 ms → 2 kare = 33,3 ms. En az 1 kare.
+   */
+  function snap(ms, frameMs) {
+    var f = frameMs || FRAME_60;
+    var n = Math.max(1, Math.round((Number(ms) || 0) / f));
+    return { frames: n, ms: n * f };
+  }
+
   function frames(ms, frameMs) {
     return Math.max(1, Math.round(ms / (frameMs || FRAME_60)));
   }
@@ -93,6 +103,7 @@
     cycleSeconds: cycleSeconds,
     autoExposure: autoExposure,
     lengthWeight: lengthWeight,
+    snap: snap,
     frames: frames,
     classify: classify
   };

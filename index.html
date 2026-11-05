@@ -34,6 +34,7 @@
         </button>
         <div class="hud-data">
           <span class="hud-item"><b id="hudExposure">–</b><small>görünme</small></span>
+          <span class="hud-item" id="hudMeasuredItem" hidden><b id="hudMeasured">–</b><small>ölçülen</small></span>
           <span class="hud-item"><b id="hudRate">–</b><small>cümle/sn</small></span>
           <span class="hud-item"><b id="hudShown">0</b><small>gösterim</small></span>
           <span class="hud-item"><b id="hudTime">00:00</b><small id="hudTimeLabel">süre</small></span>
@@ -103,9 +104,35 @@
       </div>
 
       <div class="slider-block">
-        <label for="speed" class="slider-label">Hız <span class="note-inline">(kaydırınca Manuel'e geçer)</span></label>
+        <label for="speed" class="slider-label">Hız <span class="note-inline">(kaydırınca ya da ms yazınca Manuel'e geçer)</span></label>
         <input type="range" id="speed" min="0" max="100" step="0.5">
         <div class="scale" aria-hidden="true"><span>8 sn</span><span>1 sn</span><span>100 ms</span><span>1 kare</span></div>
+      </div>
+
+      <div class="field">
+        <label for="msInput">Görünme süresi</label>
+        <div class="unit-input"><input type="number" id="msInput" min="1" max="8000" step="0.1" inputmode="decimal"><span>ms</span></div>
+      </div>
+      <div class="frame-chips" id="frameChips" role="group" aria-label="Kare sayısıyla seç"></div>
+      <p class="note" id="snapNote"></p>
+
+      <div class="sub" id="flashTiming">
+        <span class="field-label">Flaş zamanlaması</span>
+        <div class="field-grid">
+          <div class="field">
+            <label for="gapMs">Aralık</label>
+            <div class="unit-input"><input type="number" id="gapMs" min="0" max="600000" step="1" inputmode="numeric"><span>ms</span></div>
+          </div>
+          <div class="field">
+            <label for="burst">Seri</label>
+            <div class="unit-input"><input type="number" id="burst" min="1" max="20" step="1" inputmode="numeric"><span>cümle</span></div>
+          </div>
+          <div class="field">
+            <label for="jitter">Rastgelelik</label>
+            <div class="unit-input"><input type="number" id="jitter" min="0" max="100" step="5" inputmode="numeric"><span>%</span></div>
+          </div>
+        </div>
+        <p class="note" id="gapNote"></p>
       </div>
 
       <dl class="readout">
@@ -113,6 +140,7 @@
         <div><dt>Ekran karesi</dt><dd id="roFrames">–</dd></div>
         <div><dt>Akış</dt><dd id="roRate">–</dd></div>
         <div><dt>Tam döngü</dt><dd id="roCycle">–</dd></div>
+        <div id="roMeasuredCell" class="wide"><dt>Ölçülen (son 60 flaş): ortalama · en kısa–en uzun · geç kalan</dt><dd id="roMeasured">başlatınca ölçülür</dd></div>
       </dl>
     </section>
 
@@ -138,7 +166,15 @@
             <option value="up">Aşağıdan yukarı</option>
           </select>
         </div>
-        <label class="check" id="fFlashGap"><input type="checkbox" id="flashGap"> Cümleler arasına 1 boş kare koy (maskeleme)</label>
+        <div class="field" id="fPosition">
+          <label for="position">Konum</label>
+          <select id="position">
+            <option value="center">Ortada</option>
+            <option value="random">Her flaşta rastgele</option>
+            <option value="top">Üstte</option>
+            <option value="bottom">Altta</option>
+          </select>
+        </div>
         <div class="field">
           <label for="font">Yazı tipi</label>
           <select id="font">
@@ -168,6 +204,14 @@
           <input type="range" id="opacity" min="3" max="100" step="1">
         </div>
         <div class="field">
+          <label for="outline">Kontur (yazı çevresi) <output id="outlineOut" for="outline"></output></label>
+          <input type="range" id="outline" min="0" max="8" step="1">
+        </div>
+        <div class="field color-field" id="outlineColorField">
+          <label for="outlineColor">Kontur rengi</label>
+          <input type="color" id="outlineColor">
+        </div>
+        <div class="field">
           <span class="field-label">Arka plan resmi / videosu</span>
           <div class="row wrap">
             <label class="btn btn-quiet" for="mediaInput">Dosya seç</label>
@@ -179,6 +223,108 @@
         <div class="field" id="fDim" hidden>
           <label for="dim">Medyayı karart <output id="dimOut" for="dim"></output></label>
           <input type="range" id="dim" min="0" max="100" step="1">
+        </div>
+      </div>
+    </section>
+
+    <!-- EKRAN ÜSTÜ -->
+    <section class="group" aria-labelledby="h-overlay" id="overlayGroup">
+      <div class="group-head">
+        <h2 id="h-overlay">Ekran üstü</h2>
+        <span class="pill" id="overlayPill">Oyun · film · her program</span>
+      </div>
+
+      <div id="overlayWeb" class="sub">
+        <p class="note-body">Oyun, film ya da çalıştığın herhangi bir programın üstünde flaş göstermek için
+          Eşikaltı masaüstü uygulaması gerekir: tarayıcı başka pencerelerin üstüne çizemez.</p>
+        <a class="btn" id="overlayDownload" href="https://github.com/OrbaySkrcl/subliminal#masaüstü-uygulaması" target="_blank" rel="noopener">Masaüstü uygulamasını edin</a>
+      </div>
+
+      <div id="overlayDesk" class="sub" hidden>
+        <button type="button" class="btn btn-primary btn-wide" id="ovToggle">Ekran üstünde başlat</button>
+        <p class="note" id="ovStatus"></p>
+        <dl class="readout compact" id="ovReadout" hidden>
+          <div class="wide"><dt>Ölçülen: ortalama · en kısa–en uzun</dt><dd id="ovMeasured">–</dd></div>
+          <div><dt>Beklenen</dt><dd id="ovExpected">–</dd></div>
+          <div><dt>Flaş · geç kalan</dt><dd id="ovCount">0</dd></div>
+        </dl>
+
+        <div class="seg seg-3" role="radiogroup" aria-label="Ekran üstü modu">
+          <input type="radio" name="ovMode" id="ovModeFlash" value="flash"><label for="ovModeFlash">Flaş</label>
+          <input type="radio" name="ovMode" id="ovModeFlow" value="flow"><label for="ovModeFlow">Akış</label>
+          <input type="radio" name="ovMode" id="ovModeRain" value="rain"><label for="ovModeRain">Yağmur</label>
+        </div>
+
+        <div class="fields">
+          <div class="field">
+            <label for="ovMs" id="ovMsLabel">Görünme süresi</label>
+            <div class="unit-input"><input type="number" id="ovMs" min="1" max="8000" step="0.1" inputmode="decimal"><span>ms</span></div>
+            <p class="note" id="ovSnapNote"></p>
+          </div>
+          <div class="field-grid" id="ovFlashFields">
+            <div class="field">
+              <label for="ovGap">Aralık</label>
+              <div class="unit-input"><input type="number" id="ovGap" min="0" max="3600000" step="1" inputmode="numeric"><span>ms</span></div>
+            </div>
+            <div class="field">
+              <label for="ovBurst">Seri</label>
+              <div class="unit-input"><input type="number" id="ovBurst" min="1" max="20" step="1" inputmode="numeric"><span>cümle</span></div>
+            </div>
+            <div class="field">
+              <label for="ovJitter">Rastgelelik</label>
+              <div class="unit-input"><input type="number" id="ovJitter" min="0" max="100" step="5" inputmode="numeric"><span>%</span></div>
+            </div>
+          </div>
+          <p class="note" id="ovRhythm"></p>
+          <div class="field" id="ovPositionField">
+            <label for="ovPosition">Konum</label>
+            <select id="ovPosition">
+              <option value="random">Her flaşta rastgele</option>
+              <option value="center">Ortada</option>
+              <option value="top">Üstte</option>
+              <option value="bottom">Altta</option>
+            </select>
+          </div>
+          <div class="field" id="ovLanesField" hidden>
+            <label for="ovLanes"><span id="ovLanesLabel">Şerit sayısı</span> <output id="ovLanesOut" for="ovLanes"></output></label>
+            <input type="range" id="ovLanes" min="1" max="6" step="1">
+          </div>
+          <div class="field">
+            <label for="ovSize">Yazı boyutu <output id="ovSizeOut" for="ovSize"></output></label>
+            <input type="range" id="ovSize" min="16" max="140" step="1">
+          </div>
+          <div class="field">
+            <label for="ovOpacity">Yazı görünürlüğü <output id="ovOpacityOut" for="ovOpacity"></output></label>
+            <input type="range" id="ovOpacity" min="3" max="100" step="1">
+          </div>
+          <div class="field">
+            <label for="ovOutline">Kontur <output id="ovOutlineOut" for="ovOutline"></output></label>
+            <input type="range" id="ovOutline" min="0" max="8" step="1">
+          </div>
+          <div class="field-pair">
+            <div class="field color-field">
+              <label for="ovColor">Yazı rengi</label>
+              <input type="color" id="ovColor">
+            </div>
+            <div class="field color-field">
+              <label for="ovOutlineColor">Kontur rengi</label>
+              <input type="color" id="ovOutlineColor">
+            </div>
+          </div>
+          <div class="field">
+            <label for="ovDisplay">Ekran</label>
+            <select id="ovDisplay"><option value="all">Tüm ekranlar</option></select>
+          </div>
+          <div class="field">
+            <label for="ovSession">Oturum süresi</label>
+            <div class="unit-input"><input type="number" id="ovSession" min="0" max="1440" step="1" inputmode="numeric"><span>dk</span></div>
+            <p class="note">0 = sınırsız. Süre dolunca ekran üstü akış kendiliğinden durur.</p>
+          </div>
+          <label class="check"><input type="checkbox" id="ovHideCapture"> Ekran kaydında ve yayında gizle</label>
+          <label class="check"><input type="checkbox" id="ovAutoStart"> Uygulama açılınca ekran üstünü başlat</label>
+          <label class="check"><input type="checkbox" id="ovLogin"> Bilgisayar açılınca Eşikaltı'nı başlat (tepside)</label>
+          <p class="note">Oyunlarda görüntü ayarını <b>Kenarlıksız pencere</b> (Borderless) yap: "özel tam ekran"
+            modundaki oyunun üstüne hiçbir program çizemez. Filmler, YouTube, tarayıcı ve çoğu oyun sorunsuzdur.</p>
         </div>
       </div>
     </section>
@@ -237,15 +383,8 @@
       <div class="fields">
         <div class="field">
           <label for="session">Süre</label>
-          <select id="session">
-            <option value="0">Sınırsız</option>
-            <option value="5">5 dakika</option>
-            <option value="10">10 dakika</option>
-            <option value="15">15 dakika</option>
-            <option value="20">20 dakika</option>
-            <option value="30">30 dakika</option>
-            <option value="60">60 dakika</option>
-          </select>
+          <div class="unit-input"><input type="number" id="session" min="0" max="1440" step="1" inputmode="numeric"><span>dk</span></div>
+          <p class="note">0 = sınırsız. Süre dolunca akış kendiliğinden durur.</p>
         </div>
         <label class="check"><input type="checkbox" id="wake"> Akış sürerken ekranı açık tut</label>
         <button type="button" class="btn btn-quiet" id="btnResetCounters">Sayaçları sıfırla</button>
@@ -257,6 +396,7 @@
             <li><kbd>↑</kbd> <kbd>↓</kbd> hızlandır / yavaşlat</li>
             <li><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> akış / flaş / yağmur</li>
             <li><kbd>Esc</kbd> tam ekrandan çık</li>
+            <li><kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>S</kbd> ekran üstü aç / kapat (masaüstü, her yerde)</li>
           </ul>
         </div>
       </div>
@@ -288,5 +428,6 @@
 <script src="js/engine.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/app.js"></script>
+<script src="js/desktop.js"></script>
 </body>
 </html>
